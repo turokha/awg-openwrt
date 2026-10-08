@@ -1,15 +1,17 @@
 #!/bin/sh
 set -eu
 
-URL='https://raw.githubusercontent.com/turokha/awg-openwrt/master/lists/vpn-domains.txt'
+PRIMARY_URL='https://raw.githubusercontent.com/turokha/awg-openwrt/master/lists/vpn-domains.txt'
+FALLBACK_API_URL='https://api.github.com/repos/turokha/awg-openwrt/contents/lists/vpn-domains.txt?ref=master'
 DIR='/etc/pbr'
 DEST="$DIR/vpn-domains.txt"
 BAK="$DIR/vpn-domains.txt.bak"
 RAW="$(mktemp /tmp/vpn-domains.raw.XXXXXX)"
 NEW="$(mktemp /tmp/vpn-domains.new.XXXXXX)"
+APIJSON="$(mktemp /tmp/vpn-domains.api.XXXXXX)"
 
 cleanup() {
-	rm -f "$RAW" "$NEW"
+	rm -f "$RAW" "$NEW" "$APIJSON"
 }
 trap cleanup EXIT INT TERM
 
@@ -20,9 +22,37 @@ log() {
 
 mkdir -p "$DIR"
 
-if ! curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 15 --max-time 45 --retry 2 "$URL" -o "$RAW"; then
-	log "ERROR: download failed; keeping current list"
-	exit 1
+download_primary() {
+	curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 15 --max-time 45 --retry 2 "$PRIMARY_URL" -o "$RAW"
+}
+
+download_fallback() {
+	curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 15 --max-time 45 --retry 2 \
+		-H 'Accept: application/vnd.github+json' \
+		-H 'X-GitHub-Api-Version: 2022-11-28' \
+		"$FALLBACK_API_URL" -o "$APIJSON" || return 1
+
+	[ "$(jsonfilter -i "$APIJSON" -e '@.encoding' 2>/dev/null)" = 'base64' ] || return 1
+	jsonfilter -i "$APIJSON" -e '@.content' 2>/dev/null | tr -d '\r\n ' | base64 -d > "$RAW"
+	[ -s "$RAW" ]
+}
+
+if [ "${FORCE_FALLBACK:-0}" = '1' ]; then
+	log "FORCE_FALLBACK=1: skipping direct source"
+	if ! download_fallback; then
+		log "ERROR: VPN fallback download failed; keeping current list"
+		exit 1
+	fi
+	log "Downloaded list through GitHub API fallback"
+elif download_primary; then
+	log "Downloaded list from direct source"
+else
+	log "Direct source failed; trying GitHub API fallback through AWG"
+	if ! download_fallback; then
+		log "ERROR: both direct and VPN fallback downloads failed; keeping current list"
+		exit 1
+	fi
+	log "Downloaded list through GitHub API fallback"
 fi
 
 if ! awk '
@@ -63,7 +93,6 @@ fi
 cp -f "$NEW" "$DEST"
 chmod 0644 "$DEST"
 
-# PBR reload may return non-zero when it has warnings, so validate runtime state directly.
 (/etc/init.d/pbr reload >/tmp/vpn-domains-pbr.log 2>&1 || true)
 sleep 1
 
