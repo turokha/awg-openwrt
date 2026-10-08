@@ -1,0 +1,4 @@
+# Domains routed through AmneziaWG on WR3000U
+# One domain per line. Lines starting with # are ignored.
+# Initial test entry; replace/add real bypass domains after validation.
+ifconfig.me
