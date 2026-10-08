@@ -60,7 +60,8 @@ if [ -f "$DEST" ]; then
 	cp -f "$DEST" "$BAK"
 fi
 
-install -m 0644 "$NEW" "$DEST"
+cp -f "$NEW" "$DEST"
+chmod 0644 "$DEST"
 
 # PBR reload may return non-zero when it has warnings, so validate runtime state directly.
 (/etc/init.d/pbr reload >/tmp/vpn-domains-pbr.log 2>&1 || true)
