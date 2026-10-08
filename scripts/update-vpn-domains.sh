@@ -8,10 +8,9 @@ DEST="$DIR/vpn-domains.txt"
 BAK="$DIR/vpn-domains.txt.bak"
 RAW="$(mktemp /tmp/vpn-domains.raw.XXXXXX)"
 NEW="$(mktemp /tmp/vpn-domains.new.XXXXXX)"
-APIJSON="$(mktemp /tmp/vpn-domains.api.XXXXXX)"
 
 cleanup() {
-	rm -f "$RAW" "$NEW" "$APIJSON"
+	rm -f "$RAW" "$NEW"
 }
 trap cleanup EXIT INT TERM
 
@@ -28,12 +27,10 @@ download_primary() {
 
 download_fallback() {
 	curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 15 --max-time 45 --retry 2 \
-		-H 'Accept: application/vnd.github+json' \
+		-H 'Accept: application/vnd.github.raw+json' \
 		-H 'X-GitHub-Api-Version: 2022-11-28' \
-		"$FALLBACK_API_URL" -o "$APIJSON" || return 1
+		"$FALLBACK_API_URL" -o "$RAW" || return 1
 
-	[ "$(jsonfilter -i "$APIJSON" -e '@.encoding' 2>/dev/null)" = 'base64' ] || return 1
-	jsonfilter -i "$APIJSON" -e '@.content' 2>/dev/null | tr -d '\r\n ' | base64 -d > "$RAW"
 	[ -s "$RAW" ]
 }
 
