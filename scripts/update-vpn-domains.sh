@@ -1,16 +1,20 @@
 #!/bin/sh
 set -eu
 
-PRIMARY_URL='https://raw.githubusercontent.com/turokha/awg-openwrt/master/lists/vpn-domains.txt'
-FALLBACK_API_URL='https://api.github.com/repos/turokha/awg-openwrt/contents/lists/vpn-domains.txt?ref=master'
+UPSTREAM_RAW_URL='https://raw.githubusercontent.com/runetfreedom/russia-blocked-geosite/release/ru-blocked.txt'
+UPSTREAM_API_URL='https://api.github.com/repos/runetfreedom/russia-blocked-geosite/contents/ru-blocked.txt?ref=release'
+MANUAL_RAW_URL='https://raw.githubusercontent.com/turokha/awg-openwrt/master/lists/vpn-domains.txt'
+MANUAL_API_URL='https://api.github.com/repos/turokha/awg-openwrt/contents/lists/vpn-domains.txt?ref=master'
+
 DIR='/etc/pbr'
 DEST="$DIR/vpn-domains.txt"
 BAK="$DIR/vpn-domains.txt.bak"
 RAW="$(mktemp /tmp/vpn-domains.raw.XXXXXX)"
+MANUAL="$(mktemp /tmp/vpn-domains.manual.XXXXXX)"
 NEW="$(mktemp /tmp/vpn-domains.new.XXXXXX)"
 
 cleanup() {
-	rm -f "$RAW" "$NEW"
+	rm -f "$RAW" "$MANUAL" "$NEW"
 }
 trap cleanup EXIT INT TERM
 
@@ -21,59 +25,73 @@ log() {
 
 mkdir -p "$DIR"
 
-download_primary() {
-	curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 15 --max-time 45 --retry 2 "$PRIMARY_URL" -o "$RAW"
+download_raw() {
+	url="$1"
+	out="$2"
+	curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 15 --max-time 90 --retry 2 "$url" -o "$out"
 }
 
-download_fallback() {
-	curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 15 --max-time 45 --retry 2 \
+download_api_raw() {
+	url="$1"
+	out="$2"
+	curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 15 --max-time 90 --retry 2 \
 		-H 'Accept: application/vnd.github.raw+json' \
 		-H 'X-GitHub-Api-Version: 2022-11-28' \
-		"$FALLBACK_API_URL" -o "$RAW" || return 1
-
-	[ -s "$RAW" ]
+		"$url" -o "$out"
 }
 
 if [ "${FORCE_FALLBACK:-0}" = '1' ]; then
-	log "FORCE_FALLBACK=1: skipping direct source"
-	if ! download_fallback; then
-		log "ERROR: VPN fallback download failed; keeping current list"
+	log "FORCE_FALLBACK=1: using GitHub API through AWG"
+	download_api_raw "$UPSTREAM_API_URL" "$RAW" || {
+		log "ERROR: upstream VPN fallback download failed; keeping current list"
 		exit 1
-	fi
-	log "Downloaded list through GitHub API fallback"
-elif download_primary; then
-	log "Downloaded list from direct source"
+	}
 else
-	log "Direct source failed; trying GitHub API fallback through AWG"
-	if ! download_fallback; then
-		log "ERROR: both direct and VPN fallback downloads failed; keeping current list"
-		exit 1
+	if download_raw "$UPSTREAM_RAW_URL" "$RAW"; then
+		log "Downloaded upstream blocked-domain list directly"
+	else
+		log "Direct upstream download failed; trying GitHub API through AWG"
+		download_api_raw "$UPSTREAM_API_URL" "$RAW" || {
+			log "ERROR: upstream direct and VPN fallback downloads failed; keeping current list"
+			exit 1
+		}
+		log "Downloaded upstream blocked-domain list through GitHub API fallback"
 	fi
-	log "Downloaded list through GitHub API fallback"
 fi
 
-if ! awk '
-{
-	gsub(/\r/, "")
-	sub(/#.*/, "")
-	gsub(/^[ \t]+|[ \t]+$/, "")
-	if ($0 == "") next
-	d = tolower($0)
-	if (d !~ /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/ || d !~ /\./ || d ~ /\.\./) {
-		print "Invalid domain: " $0 > "/dev/stderr"
-		bad = 1
-		next
+if ! download_raw "$MANUAL_RAW_URL" "$MANUAL"; then
+	log "Manual list direct download failed; trying GitHub API through AWG"
+	download_api_raw "$MANUAL_API_URL" "$MANUAL" || {
+		log "WARNING: manual additions unavailable; continuing with upstream only"
+		: > "$MANUAL"
 	}
-	print d
-}
-END { if (bad) exit 2 }
-' "$RAW" | sort -u > "$NEW"; then
-	log "ERROR: validation failed; keeping current list"
-	exit 1
 fi
+
+{
+	awk '
+	/^domain:/ {
+		d=$0
+		sub(/^domain:/, "", d)
+		gsub(/\r/, "", d)
+		d=tolower(d)
+		if (d ~ /^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$/ && d ~ /\./ && d !~ /\.\./) print d
+	}
+	' "$RAW"
+
+	awk '
+	{
+		gsub(/\r/, "")
+		sub(/#.*/, "")
+		gsub(/^[ \t]+|[ \t]+$/, "")
+		if ($0 == "") next
+		d=tolower($0)
+		if (d ~ /^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$/ && d ~ /\./ && d !~ /\.\./) print d
+	}
+	' "$MANUAL"
+} | sort -u > "$NEW"
 
 COUNT="$(wc -l < "$NEW" | tr -d ' ')"
-if [ "$COUNT" -lt 1 ] || [ "$COUNT" -gt 50000 ]; then
+if [ "$COUNT" -lt 10000 ] || [ "$COUNT" -gt 150000 ]; then
 	log "ERROR: unreasonable domain count ($COUNT); keeping current list"
 	exit 1
 fi
@@ -91,9 +109,11 @@ cp -f "$NEW" "$DEST"
 chmod 0644 "$DEST"
 
 (/etc/init.d/pbr reload >/tmp/vpn-domains-pbr.log 2>&1 || true)
-sleep 1
+sleep 2
 
-if /etc/init.d/pbr running >/dev/null 2>&1 && nft list set inet fw4 pbr_awg0_4_dst_ip_vpn_domains >/dev/null 2>&1 && grep -q 'pbr_awg0_4_dst_ip_vpn_domains' /var/run/pbr.dnsmasq 2>/dev/null; then
+if /etc/init.d/pbr running >/dev/null 2>&1 \
+	&& nft list set inet fw4 pbr_awg0_4_dst_ip_user >/dev/null 2>&1 \
+	&& grep -q 'pbr_awg0_4_dst_ip_user' /var/run/pbr.dnsmasq 2>/dev/null; then
 	log "Updated successfully ($COUNT domains)"
 	exit 0
 fi
