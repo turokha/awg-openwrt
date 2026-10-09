@@ -10,7 +10,6 @@ DNSMASQ_FILE="${packageDnsmasqFile:-/var/run/pbr.dnsmasq}"
 CHUNK_SIZE=200
 
 [ -s "$DOMAIN_FILE" ] || return 1
-nft list set $TARGET_TABLE "$TARGET_NFTSET_4" >/dev/null 2>&1 || return 1
 touch "$DNSMASQ_FILE"
 
 awk -v target="4#inet#fw4#$TARGET_NFTSET_4" -v chunk="$CHUNK_SIZE" '
