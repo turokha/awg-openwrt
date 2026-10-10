@@ -3,8 +3,7 @@ set -eu
 
 DOMAIN_RAW='https://raw.githubusercontent.com/runetfreedom/russia-blocked-geosite/release/ru-blocked.txt'
 DOMAIN_API='https://api.github.com/repos/runetfreedom/russia-blocked-geosite/contents/ru-blocked.txt?ref=release'
-NETWORK_RAW='https://raw.githubusercontent.com/runetfreedom/russia-blocked-geoip/release/text/ru-blocked.txt'
-NETWORK_API='https://api.github.com/repos/runetfreedom/russia-blocked-geoip/contents/text/ru-blocked.txt?ref=release'
+NETWORK_RAW='https://antifilter.download/list/subnet.lst'
 
 MANUAL_DOMAIN_RAW='https://raw.githubusercontent.com/turokha/awg-openwrt/master/lists/manual-vpn-domains.txt'
 MANUAL_DOMAIN_API='https://api.github.com/repos/turokha/awg-openwrt/contents/lists/manual-vpn-domains.txt?ref=master'
@@ -82,8 +81,16 @@ download_github_source "$DOMAIN_RAW" "$DOMAIN_API" "$DOMAIN_RAW_TMP" 'blocked-do
 	exit 1
 }
 
-download_github_source "$NETWORK_RAW" "$NETWORK_API" "$NETWORK_RAW_TMP" 'blocked-network list' || {
-	log "ERROR: blocked-network source unavailable; keeping current routes"
+NETWORK_SOURCE_CACHE="$DIR/auto-vpn-networks.txt"
+
+if download_raw "$NETWORK_RAW" "$NETWORK_RAW_TMP"; then
+	log "Downloaded explicit blocked-subnet list directly"
+	cp -f "$NETWORK_RAW_TMP" "$NETWORK_SOURCE_CACHE"
+elif [ -s "$NETWORK_SOURCE_CACHE" ]; then
+	log "WARNING: blocked-subnet source unavailable; using cached copy"
+	cp -f "$NETWORK_SOURCE_CACHE" "$NETWORK_RAW_TMP"
+else
+	log "ERROR: blocked-subnet source unavailable and no cache exists; keeping current routes"
 	exit 1
 }
 
@@ -167,8 +174,13 @@ if [ "$DOMAIN_COUNT" -lt 10000 ] || [ "$DOMAIN_COUNT" -gt 150000 ]; then
 	exit 1
 fi
 
-if [ "$NETWORK_COUNT" -lt 1000 ] || [ "$NETWORK_COUNT" -gt 500000 ]; then
+if [ "$NETWORK_COUNT" -lt 1 ] || [ "$NETWORK_COUNT" -gt 2000 ]; then
 	log "ERROR: unreasonable IPv4 network count ($NETWORK_COUNT); keeping current routes"
+	exit 1
+fi
+
+if grep -qx '0.0.0.0/0' "$NETWORK_NEW"; then
+	log "ERROR: default route found in IPv4 network list; keeping current routes"
 	exit 1
 fi
 
