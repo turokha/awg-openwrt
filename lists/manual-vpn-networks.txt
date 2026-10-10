@@ -1,0 +1,5 @@
+# Manual VPN IPv4 network additions.
+# One IPv4 address or CIDR per line, for example:
+# 203.0.113.42
+# 198.51.100.0/24
+# Entries are merged with the maintained Russia blocked-network list.
