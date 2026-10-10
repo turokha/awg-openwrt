@@ -186,6 +186,14 @@ fi
 
 if grep -Eq '/([0-7])
 
+if [ "${DRY_RUN:-0}" = '1' ]; then
+	cp -f "$DOMAIN_NEW" /tmp/vpn-domains.candidate
+	cp -f "$NETWORK_NEW" /tmp/vpn-networks.candidate
+	log "DRY RUN OK ($DOMAIN_COUNT domains, $NETWORK_COUNT IPv4 networks)"
+	log "Candidates: /tmp/vpn-domains.candidate /tmp/vpn-networks.candidate"
+	exit 0
+fi
+
 DOMAIN_CHANGED=1
 NETWORK_CHANGED=1
 [ -f "$DOMAIN_DEST" ] && cmp -s "$DOMAIN_NEW" "$DOMAIN_DEST" && DOMAIN_CHANGED=0
