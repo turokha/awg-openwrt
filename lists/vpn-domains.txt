@@ -1,4 +1,0 @@
-# Manual additions to the Russia blocked-domain routing list.
-# One plain domain per line, without "domain:" prefix.
-# The updater also imports the maintained ru-blocked list from
-# runetfreedom/russia-blocked-geosite (release branch).
