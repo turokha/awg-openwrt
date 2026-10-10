@@ -11,7 +11,6 @@ DNSMASQ_FILE="${packageDnsmasqFile:-/var/run/pbr.dnsmasq}"
 CHUNK_SIZE=200
 
 [ -s "$DOMAIN_FILE" ] || return 1
-[ -s "$NETWORK_FILE" ] || return 1
 
 touch "$DNSMASQ_FILE"
 
@@ -32,11 +31,12 @@ NF {
 END { flush_line() }
 ' "$DOMAIN_FILE" >> "$DNSMASQ_FILE" || return 1
 
-nft list set $TARGET_TABLE "$TARGET_NFTSET_4" >/dev/null 2>&1 || return 1
+if [ -s "$NETWORK_FILE" ]; then
+	nft list set $TARGET_TABLE "$TARGET_NFTSET_4" >/dev/null 2>&1 || return 1
 
-NFT_BATCH="$(mktemp /tmp/pbr-ru-blocked.XXXXXX)" || return 1
+	NFT_BATCH="$(mktemp /tmp/pbr-ru-blocked.XXXXXX)" || return 1
 
-awk -v set="$TARGET_NFTSET_4" -v chunk="$CHUNK_SIZE" '
+	awk -v set="$TARGET_NFTSET_4" -v chunk="$CHUNK_SIZE" '
 function flush_line() {
     if (n > 0) {
         print "add element inet fw4 " set " { " elems " }"
@@ -52,14 +52,16 @@ NF {
 }
 END { flush_line() }
 ' "$NETWORK_FILE" > "$NFT_BATCH" || {
-	rm -f "$NFT_BATCH"
-	return 1
-}
+		rm -f "$NFT_BATCH"
+		return 1
+	}
 
-nft -f "$NFT_BATCH" || {
-	rm -f "$NFT_BATCH"
-	return 1
-}
+	nft -f "$NFT_BATCH" || {
+		rm -f "$NFT_BATCH"
+		return 1
+	}
 
-rm -f "$NFT_BATCH"
+	rm -f "$NFT_BATCH"
+fi
+
 return 0
