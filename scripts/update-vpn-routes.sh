@@ -92,7 +92,7 @@ elif [ -s "$NETWORK_SOURCE_CACHE" ]; then
 else
 	log "ERROR: blocked-subnet source unavailable and no cache exists; keeping current routes"
 	exit 1
-}
+fi
 
 if download_github_source "$MANUAL_DOMAIN_RAW" "$MANUAL_DOMAIN_API" "$MANUAL_DOMAIN_TMP" 'manual domain list'; then
 	cp -f "$MANUAL_DOMAIN_TMP" "$MANUAL_DOMAIN_CACHE"
@@ -181,6 +181,67 @@ fi
 
 if grep -qx '0.0.0.0/0' "$NETWORK_NEW"; then
 	log "ERROR: default route found in IPv4 network list; keeping current routes"
+	exit 1
+fi
+
+if grep -Eq '/([0-7])
+
+DOMAIN_CHANGED=1
+NETWORK_CHANGED=1
+[ -f "$DOMAIN_DEST" ] && cmp -s "$DOMAIN_NEW" "$DOMAIN_DEST" && DOMAIN_CHANGED=0
+[ -f "$NETWORK_DEST" ] && cmp -s "$NETWORK_NEW" "$NETWORK_DEST" && NETWORK_CHANGED=0
+
+if [ "$DOMAIN_CHANGED" -eq 0 ] && [ "$NETWORK_CHANGED" -eq 0 ]; then
+	log "No changes ($DOMAIN_COUNT domains, $NETWORK_COUNT IPv4 networks)"
+	exit 0
+fi
+
+DOMAIN_HAD_OLD=0
+NETWORK_HAD_OLD=0
+
+if [ -f "$DOMAIN_DEST" ]; then
+	cp -f "$DOMAIN_DEST" "$DOMAIN_BAK"
+	DOMAIN_HAD_OLD=1
+fi
+
+if [ -f "$NETWORK_DEST" ]; then
+	cp -f "$NETWORK_DEST" "$NETWORK_BAK"
+	NETWORK_HAD_OLD=1
+fi
+
+cp -f "$DOMAIN_NEW" "$DOMAIN_DEST"
+cp -f "$NETWORK_NEW" "$NETWORK_DEST"
+chmod 0644 "$DOMAIN_DEST" "$NETWORK_DEST"
+
+(/etc/init.d/pbr reload >/tmp/vpn-routes-pbr.log 2>&1 || true)
+sleep 2
+
+if /etc/init.d/pbr running >/dev/null 2>&1 \
+	&& nft list set inet fw4 pbr_awg0_4_dst_ip_user >/dev/null 2>&1 \
+	&& grep -q 'pbr_awg0_4_dst_ip_user' /var/run/pbr.dnsmasq 2>/dev/null \
+	&& nft list set inet fw4 pbr_awg0_4_dst_ip_user 2>/dev/null | grep -q 'elements = {'; then
+	log "Updated successfully ($DOMAIN_COUNT domains, $NETWORK_COUNT IPv4 networks)"
+	exit 0
+fi
+
+log "ERROR: PBR validation failed; rolling back"
+
+if [ "$DOMAIN_HAD_OLD" -eq 1 ]; then
+	cp -f "$DOMAIN_BAK" "$DOMAIN_DEST"
+else
+	rm -f "$DOMAIN_DEST"
+fi
+
+if [ "$NETWORK_HAD_OLD" -eq 1 ]; then
+	cp -f "$NETWORK_BAK" "$NETWORK_DEST"
+else
+	rm -f "$NETWORK_DEST"
+fi
+
+(/etc/init.d/pbr reload >/dev/null 2>&1 || true)
+exit 1
+ "$NETWORK_NEW"; then
+	log "ERROR: dangerously broad IPv4 prefix found; keeping current routes"
 	exit 1
 fi
 
