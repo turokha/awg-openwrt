@@ -1,0 +1,4 @@
+# Manual VPN domain additions.
+# One plain domain per line. No scheme, path, wildcard, or "domain:" prefix.
+# Entries are merged with the maintained Russia blocked-domain list.
+ifconfig.me
